@@ -2,6 +2,16 @@
  
 This script will connect to a SEQTA database and extract data from an approved_classes.csv file. Then the data is formatted for Microsoft SDS compliant csv files. 
 
+### Known Issues
+
+Thing that don't work yet
+
+```
+Including a class with no teachers and/or students will result in processing stopping at that class.
+A future update will account for this
+```
+
+
 ### Prerequisites
 
 What do you need to get this working
