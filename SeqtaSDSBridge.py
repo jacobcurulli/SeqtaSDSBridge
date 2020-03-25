@@ -167,7 +167,6 @@ try:
             if not csvSectionFileExists:
                 writer.writerow(["SIS ID", "School SIS ID", "Section Name", "Section Number", "Term SIS ID", "Term Name", "Course SIS ID", "Course Name", "Course Description"])
             writer.writerow([(classUnitID), (schoolSISId), (classTeamName), (classUnitID), (classTermID), (classTermName), (classUnitID), (classSubjectName), (classSubjectDescription)])
-            print ("Writing class section row:")
 
         # Check if the csv teacher roster file exists
         csvTeacherRosterFileExists = os.path.isfile(csvTeacherRosterFileName)
