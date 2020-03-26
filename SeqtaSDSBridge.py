@@ -23,6 +23,9 @@ import os.path
 import configparser
 from datetime import datetime
 
+# Get the date
+dateNow = datetime.now()
+
 # Read the config.ini file
 config = configparser.ConfigParser()
 config.read('config.ini')
@@ -48,7 +51,7 @@ classTermName=config['school']['classTermName']
 staffList = set()
 studentList = set()
 classArray = tuple()
-currentYear = datetime.now().year
+currentYear = dateNow.strftime("%Y")
 print("current year is:", currentYear)
 
 # file locations, this can be changed to suit your environment
@@ -80,7 +83,7 @@ try:
         classList = list(csv.reader(csvfile))
         print (type(classList))
         print (classList)
-        print ("Number of classes imported from csv: ",classList.count())
+        print ("Number of classes imported from csv list: ",len(classList))
 
 except:
     print("***************************")
@@ -140,14 +143,26 @@ try:
         print("Class team name (classTeamName) is:", classTeamName)
         print("Class subject Name (classSubjectName) is:", classSubjectName)
 
+
         # Get StaffID in this classUnit
-        sq_staffIDQuery = "SELECT staff from public.classinstance WHERE classunit = (%s);"
+        sq_staffIDQuery = "SELECT staff from public.classinstance WHERE classunit = (%s) and date <= current_date ORDER BY id DESC LIMIT 1;"
         cursor.execute(sq_staffIDQuery, (classUnitID,))
         staffID_pre = cursor.fetchone()
-        staffID = int(staffID_pre[0])
-        print("Staff ID is:", (staffID))
-        # Write to teacher ID list
-        staffList.add(staffID)
+        if staffID_pre is None:
+            print("Couldn't find a class today or previously for classunit:", classUnitID)
+            print("Checking for a class up to 14 days in the future and selecting the closest date to today")
+            sq_staffIDQuery = "SELECT staff from public.classinstance WHERE classunit = (%s) date = current_date + interval '14 day' ORDER BY id DESC LIMIT 1;"
+            cursor.execute(sq_staffIDQuery, (classUnitID,))
+            staffID_pre = cursor.fetchone()
+            staffID = int(staffID_pre[0])
+            print("Staff ID is:", (staffID))
+            # Write to teacher ID list
+            staffList.add(staffID)
+        else:
+            staffID = int(staffID_pre[0])
+            print("Staff ID is:", (staffID))
+            # Write to teacher ID list
+            staffList.add(staffID)
 
         # Get Student ID's for this classUnit
         sq_studentIDListQuery = "SELECT student from \"classunitStudent\" WHERE classunit = (%s) and removed is NULL;"
@@ -167,6 +182,7 @@ try:
             if not csvSectionFileExists:
                 writer.writerow(["SIS ID", "School SIS ID", "Section Name", "Section Number", "Term SIS ID", "Term Name", "Course SIS ID", "Course Name", "Course Description"])
             writer.writerow([(classUnitID), (schoolSISId), (classTeamName), (classUnitID), (classTermID), (classTermName), (classUnitID), (classSubjectName), (classSubjectDescription)])
+            print ("Writing class section row")
 
         # Check if the csv teacher roster file exists
         csvTeacherRosterFileExists = os.path.isfile(csvTeacherRosterFileName)
