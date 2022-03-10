@@ -56,6 +56,7 @@ print("current year is:", currentYear)
 
 # file locations, this can be changed to suit your environment
 csvApprovedClasses = "approved_classes.csv"
+csvAdditionalTeachers = "additional_teachers.csv"
 csvSchoolFilename = "sds/School.csv"
 csvSectionFileName = "sds/Section.csv"
 csvStudentFileName = "sds/Student.csv"
@@ -63,7 +64,7 @@ csvTeacherFileName = "sds/Teacher.csv"
 csvTeacherRosterFileName = "sds/TeacherRoster.csv"
 csvStudentEnrollmentFileName = "sds/StudentEnrollment.csv"
 
-# remove the csv files if they already exist. This is a messy way of doing it but I learnt python 2 days ago so whatever
+# remove the csv files if they already exist. This is a messy way of doing it and should be fixed.
 if os.path.exists(csvSchoolFilename):
     os.remove(csvSchoolFilename)
 if os.path.exists(csvSectionFileName):
@@ -87,7 +88,19 @@ try:
 
 except:
     print("***************************")
-    print("Error importing csv file")
+    print("Error importing approved class csv file")
+
+try:
+    # Import CSV file for additional teachers
+    with open(csvAdditionalTeachers, newline='', encoding='utf-8-sig') as csvfile:
+        teacherList = list(csv.reader(csvfile))
+        print (type(teacherList))
+        print (teacherList)
+        print ("Number of additional classes imported from csv list: ",len(teacherList))
+
+except:
+    print("***************************")
+    print("Error importing additional teachers csv file")
 
 # Open connection to Seqta
 try:
@@ -114,7 +127,7 @@ try:
         record = cursor.fetchone()
 
         # Lookup classID from Class name in Seqta
-        sq_classUnitQuery = "SELECT * FROM public.classunit WHERE name = (%s);"
+        sq_classUnitQuery = "SELECT * FROM public.classunit WHERE name = (%s) ORDER BY id ASC LIMIT 1;"
         cursor.execute(sq_classUnitQuery,(className,))
         classUnitPull = cursor.fetchall()
         print("Getting class information for:", (className))
@@ -126,10 +139,6 @@ try:
         print("Class unit ID (classUnitID) is:", classUnitID)
         print("Class subject ID (classSubjectID) is:", classSubjectID)
         print("Class term ID (classTermID) is:", classTermID)
-
-        # Check if class has a staff member or students
-        # If they don't we need to stop processing the class and drop it gracefully
-
 
         # Get subject description for Class
         sq_classSubjectQuery = "SELECT * FROM subject WHERE id = (%s);"
@@ -143,69 +152,145 @@ try:
         print("Class team name (classTeamName) is:", classTeamName)
         print("Class subject Name (classSubjectName) is:", classSubjectName)
 
-
-        # Get StaffID in this classUnit
-        sq_staffIDQuery = "SELECT staff from public.classinstance WHERE classunit = (%s) and date <= current_date ORDER BY id DESC LIMIT 1;"
-        cursor.execute(sq_staffIDQuery, (classUnitID,))
-        staffID_pre = cursor.fetchone()
-        if staffID_pre is None:
-            print("Couldn't find a class today or previously for classunit:", classUnitID)
-            print("Checking for a class up to 14 days in the future and selecting the closest date to today")
-            sq_staffIDQuery = "SELECT staff from public.classinstance WHERE classunit = (%s) date = current_date + interval '14 day' ORDER BY id DESC LIMIT 1;"
+        # Check if class has a staff member or students
+        # If they don't we need to stop processing the class and drop it gracefully
+        try:
+            print("Checking to make sure that there is a staff member assigned to this class")
+            staffID = None
+            # Get StaffID in this classUnit
+            sq_staffIDQuery = "SELECT staff from public.classinstance WHERE classunit = (%s) and date = current_date ORDER BY id DESC LIMIT 1;"
             cursor.execute(sq_staffIDQuery, (classUnitID,))
             staffID_pre = cursor.fetchone()
-            staffID = int(staffID_pre[0])
-            print("Staff ID is:", (staffID))
-            # Write to teacher ID list
-            staffList.add(staffID)
-        else:
-            staffID = int(staffID_pre[0])
-            print("Staff ID is:", (staffID))
-            # Write to teacher ID list
-            staffList.add(staffID)
+            print("staffIDpre is:", (staffID_pre))
+            if staffID_pre is None:
+                print("Couldn't find a class today or previously for classunit:", classUnitID)
+                print("Checking for a class up to 14 days in the future and selecting the closest date to today")
+                try:
+                    # Check for staff member
+                    print("Check for staff member in the future")
+                    print("Class unit id we are checking against is:",(classUnitID))
+                    sq_staffIDQuery = "SELECT staff from public.classinstance WHERE classunit = (%s) and date between current_date and current_date + interval '14 days' ORDER BY id ASC LIMIT 1;"
+                    cursor.execute(sq_staffIDQuery, (classUnitID,))
+                    staffID_pre = cursor.fetchone()
+                    staffID = int(staffID_pre[0])
+                    print("Found one and the staff ID is:", (staffID))
+                    # Write to teacher ID list
+                    staffList.add(staffID)
 
-        # Get Student ID's for this classUnit
-        sq_studentIDListQuery = "SELECT student from \"classunitStudent\" WHERE classunit = (%s) and removed is NULL;"
-        cursor.execute(sq_studentIDListQuery, (classUnitID,))
-        studentIDArray = tuple([r[0] for r in cursor.fetchall()])
-        print("List of students in class name:", className)
-        print(studentIDArray)
-        for row in studentIDArray:
-            studentList.add(row)
+                    try:
+                        # Checking to make sure there are students assigned to the class
+                        print("Checking to make sure there are students assigned to the class")
+                        # Get Student ID's for this classUnit
+                        # sq_studentIDListQuery = "SELECT student from \"classunitStudent\" WHERE classunit = (%s) and removed is NULL;"
+                        sq_studentIDListQuery = "SELECT student from \"classunitStudent\" INNER JOIN student on student.id = \"classunitStudent\".student and status ='FULL' and classunit = (%s) and removed is NULL;"
+                        cursor.execute(sq_studentIDListQuery, (classUnitID,))
+                        studentIDArray = tuple([r[0] for r in cursor.fetchall()])
+                        print("List of students in class name:", className)
+                        print(studentIDArray)
+                        for row in studentIDArray:
+                            studentList.add(row)
+                    except:
+                        print("Couldn't find students for that class, skipping it. Class is: ", classTeamName)
 
-        # Check if the csv section file exists
-        csvSectionFileExists = os.path.isfile(csvSectionFileName)
-        # Write to the section csv file
-        with open(csvSectionFileName, 'a', newline='') as csvSection:
-            writer = csv.writer(csvSection)
-            # If the csv doesn't exist already we'll need to put in the headers
-            if not csvSectionFileExists:
-                writer.writerow(["SIS ID", "School SIS ID", "Section Name", "Section Number", "Term SIS ID", "Term Name", "Course SIS ID", "Course Name", "Course Description"])
-            writer.writerow([(classUnitID), (schoolSISId), (classTeamName), (classUnitID), (classTermID), (classTermName), (classUnitID), (classSubjectName), (classSubjectDescription)])
-            print ("Writing class section row")
+                    # Check if the csv section file exists
+                    csvSectionFileExists = os.path.isfile(csvSectionFileName)
+                    # Write to the section csv file
+                    with open(csvSectionFileName, 'a', newline='') as csvSection:
+                        writer = csv.writer(csvSection)
+                        # If the csv doesn't exist already we'll need to put in the headers
+                        if not csvSectionFileExists:
+                            writer.writerow(["SIS ID", "School SIS ID", "Section Name", "Section Number", "Term SIS ID",
+                                             "Term Name", "Course SIS ID", "Course Name", "Course Description"])
+                        writer.writerow([(classUnitID), (schoolSISId), (classTeamName), (classUnitID), (classTermID),
+                                         (classTermName), (classUnitID), (classSubjectName), (classSubjectDescription)])
+                        print("Writing class section row")
 
-        # Check if the csv teacher roster file exists
-        csvTeacherRosterFileExists = os.path.isfile(csvTeacherRosterFileName)
-        # Write to the teacher roster csv file
-        with open(csvTeacherRosterFileName, 'a', newline='') as csvTeacherRoster:
-            writer = csv.writer(csvTeacherRoster)
-        # If the csv doesn't exist already we'll need to put in the headers
-            if not csvTeacherRosterFileExists:
-                    writer.writerow(["Section SIS ID", "SIS ID"])
-            writer.writerow([(classUnitID), (staffID)])
-            # Also include the Teams Admin account as a teacher
-            writer.writerow([(classUnitID), (teamsAdminID)])
-            print("Written staff to roster")
-        # Check if the csv student enrollment file exists
-        csvStudentEnrollmentFileNameExists = os.path.isfile(csvStudentEnrollmentFileName)
-        # Write to the student enrollment csv file
-        with open(csvStudentEnrollmentFileName, 'a', newline='') as csvStudentEnrollment:
-            writer = csv.writer(csvStudentEnrollment)
-            # If the csv doesn't exist already we'll need to put in the headers
-            if not csvStudentEnrollmentFileNameExists:
-                writer.writerow(["Section SIS ID", "SIS ID"])
-            for studentInArray in studentIDArray:
-                writer.writerow([(classUnitID), (studentInArray)])
+                    # Check if the csv teacher roster file exists
+                    csvTeacherRosterFileExists = os.path.isfile(csvTeacherRosterFileName)
+                    # Write to the teacher roster csv file
+                    with open(csvTeacherRosterFileName, 'a', newline='') as csvTeacherRoster:
+                        writer = csv.writer(csvTeacherRoster)
+                        # If the csv doesn't exist already we'll need to put in the headers
+                        if not csvTeacherRosterFileExists:
+                            writer.writerow(["Section SIS ID", "SIS ID"])
+                        writer.writerow([(classUnitID), (staffID)])
+                        # Also include the Teams Admin account as a teacher
+                        writer.writerow([(classUnitID), (teamsAdminID)])
+                        print("Written staff to roster")
+                    # Check if the csv student enrollment file exists
+                    csvStudentEnrollmentFileNameExists = os.path.isfile(csvStudentEnrollmentFileName)
+                    # Write to the student enrollment csv file
+                    with open(csvStudentEnrollmentFileName, 'a', newline='') as csvStudentEnrollment:
+                        writer = csv.writer(csvStudentEnrollment)
+                        # If the csv doesn't exist already we'll need to put in the headers
+                        if not csvStudentEnrollmentFileNameExists:
+                            writer.writerow(["Section SIS ID", "SIS ID"])
+                        for studentInArray in studentIDArray:
+                            writer.writerow([(classUnitID), (studentInArray)])
+
+                except:
+                    print("Didn't find a staff member in the future. This might be a dead class")
+            else:
+                staffID = int(staffID_pre[0])
+                print("We found a staff member assigned to the class")
+                print("Staff ID is:", (staffID))
+                # Write to teacher ID list
+                staffList.add(staffID)
+
+                print("If this is the last line in the log then it was probably a dead class with no staff member assigned")
+                print("Staff member assigned to this class is", (staffID))
+
+                try:
+                    # Checking to make sure there are students assigned to the class
+                    print("Checking to make sure there are students assigned to the class")
+                    # Get Student ID's for this classUnit
+                    #sq_studentIDListQuery = "SELECT student from \"classunitStudent\" WHERE classunit = (%s) and removed is NULL;"
+                    sq_studentIDListQuery = "SELECT student from \"classunitStudent\" INNER JOIN student on student.id = \"classunitStudent\".student and status ='FULL' and classunit = (%s) and removed is NULL;"
+                    cursor.execute(sq_studentIDListQuery, (classUnitID,))
+                    studentIDArray = tuple([r[0] for r in cursor.fetchall()])
+                    print("List of students in class name:", className)
+                    print(studentIDArray)
+                    for row in studentIDArray:
+                        studentList.add(row)
+                except:
+                    print("Couldn't find students for that class, skipping it. Class is: ", classTeamName)
+
+                # Check if the csv section file exists
+                csvSectionFileExists = os.path.isfile(csvSectionFileName)
+                # Write to the section csv file
+                with open(csvSectionFileName, 'a', newline='') as csvSection:
+                    writer = csv.writer(csvSection)
+                    # If the csv doesn't exist already we'll need to put in the headers
+                    if not csvSectionFileExists:
+                        writer.writerow(["SIS ID", "School SIS ID", "Section Name", "Section Number", "Term SIS ID", "Term Name", "Course SIS ID", "Course Name", "Course Description"])
+                    writer.writerow([(classUnitID), (schoolSISId), (classTeamName), (classUnitID), (classTermID), (classTermName), (classUnitID), (classSubjectName), (classSubjectDescription)])
+                    print ("Writing class section row")
+
+                # Check if the csv teacher roster file exists
+                csvTeacherRosterFileExists = os.path.isfile(csvTeacherRosterFileName)
+                # Write to the teacher roster csv file
+                with open(csvTeacherRosterFileName, 'a', newline='') as csvTeacherRoster:
+                    writer = csv.writer(csvTeacherRoster)
+                # If the csv doesn't exist already we'll need to put in the headers
+                    if not csvTeacherRosterFileExists:
+                            writer.writerow(["Section SIS ID", "SIS ID"])
+                    writer.writerow([(classUnitID), (staffID)])
+                    # Also include the Teams Admin account as a teacher
+                    writer.writerow([(classUnitID), (teamsAdminID)])
+                    print("Written staff to roster")
+                # Check if the csv student enrollment file exists
+                csvStudentEnrollmentFileNameExists = os.path.isfile(csvStudentEnrollmentFileName)
+                # Write to the student enrollment csv file
+                with open(csvStudentEnrollmentFileName, 'a', newline='') as csvStudentEnrollment:
+                    writer = csv.writer(csvStudentEnrollment)
+                    # If the csv doesn't exist already we'll need to put in the headers
+                    if not csvStudentEnrollmentFileNameExists:
+                        writer.writerow(["Section SIS ID", "SIS ID"])
+                    for studentInArray in studentIDArray:
+                        writer.writerow([(classUnitID), (studentInArray)])
+        except:
+            print("Couldn't find a teacher for that class, skipping it. Class is: ", classTeamName)
+
 except:
     print("")
     print("***************************")
@@ -218,7 +303,6 @@ try:
     print(staffList)
 
     for staff in staffList:
-
         # Now get the staff information
         sq_staffQuery = "SELECT * from public.staff WHERE id = (%s);"
         cursor.execute(sq_staffQuery, (staff,))
@@ -262,6 +346,7 @@ try:
         cursor.execute(sq_studentQuery, (student,))
         studentPull = cursor.fetchall()
         for row in studentPull:
+            studentSynId = row[1]
             studentFirstName = row[3]
             studentLastName = row[6]
             studentUsername = row[47]
@@ -269,7 +354,7 @@ try:
         print("Student First Name (studentFirstName) is:", studentFirstName)
         print("Student Last Name (studentLastName) is:", studentLastName)
         print("Student username (studentUsername) is:", studentUsername)
-        print("Student ID is (student) is:", student)
+        print("Student Syn ID is (studentSynId) is:", studentSynId)
 
         # Now we write this information to the Student.csv file
         # Check if the csv Student file exists
@@ -280,7 +365,7 @@ try:
             # If the csv doesn't exist already we'll need to put in the headers
             if not csvStudentFileNameExists:
                 writer.writerow(["SIS ID", "School SIS ID", "First Name", "Last Name", "Username", "Student Number"])
-            writer.writerow([(student), (schoolSISId), (studentFirstName), (studentLastName), (studentUsername), (student)])
+            writer.writerow([(student), (schoolSISId), (studentFirstName), (studentLastName), (studentUsername), (studentSynId)])
 except:
     print("something went wrong getting the student data")
 
@@ -292,6 +377,70 @@ try:
         writer.writerow([(schoolSISId),(schoolName)])
 except:
     print("something went wrong writing the school csv file")
+
+# Here is where we'll check to see if we need to add any other teachers to the TeacherRoster.csv
+try:
+    for each in teacherList:
+        print ("Starting additional teacher list")
+        print (teacherList)
+        #teacherName = str(('[%s]' % ', '.join(map(str, (i))))[1:-1])
+        teacherName = [each[0]]
+        additionalClassName = [each[1]]
+        print ("*******************")
+        print ("Teacher Username is:", (each[0]))
+        print ("Class name is:", (each[1]))
+        # Print PostgreSQL version
+        cursor.execute("SELECT version();")
+        record = cursor.fetchone()
+
+        # Lookup classID from Class name in Seqta
+        sq_classUnitQuery = "SELECT id FROM public.classunit WHERE name = (%s) ORDER BY id ASC LIMIT 1;"
+        cursor.execute(sq_classUnitQuery,(each[1],))
+        additionalClassUnitPull = cursor.fetchall()
+        print("Getting class information for:", (each[1]))
+        for row in additionalClassUnitPull:
+            print ("Row from class unit pull is:", (row[0]))
+            additionalClassUnitID = row[0]
+        print ("Additional class id is:", (additionalClassUnitID))
+
+        # Now get the staff information
+        sq_additionalStaffQuery = "SELECT id from public.staff WHERE UPPER(username) = UPPER((%s));"
+        cursor.execute(sq_additionalStaffQuery, (each[0],))
+        additionalStaffPull = cursor.fetchall()
+        print ("whole staff query pull is below")
+        print (additionalStaffPull)
+        print("Getting teacher information for:", (each[0]))
+        for item in additionalStaffPull:
+            print("Row from teacher unit pull is:", (item[0]))
+            additionalTeacherId = item[0]
+        print("Staff ID is:", additionalTeacherId)
+
+        #*#
+        # Now get the staff information
+        sq_additionalStaffQuery = "SELECT * from public.staff WHERE id = (%s);"
+        cursor.execute(sq_staffQuery, (staff,))
+        staffPull = cursor.fetchall()
+        for row in staffPull:
+            staffFirstName = row[4]
+            staffLastName = row[7]
+            staffUsername = row[21]
+
+        print("Staff First Name (staffFirstName) is:", staffFirstName)
+        print("Staff Last Name (staffLastName) is:", staffLastName)
+        print("Staff username (staffUsername) is:", staffUsername)
+        print("Staff ID is (staff) is:", staff)
+        #*#
+
+        # Now we need to add the additional teachers to the teacher roster csv
+        with open(csvTeacherRosterFileName, 'a', newline='') as csvTeacherRoster:
+            writer = csv.writer(csvTeacherRoster)
+            writer.writerow([(additionalClassUnitID), (additionalTeacherId)])
+            print("Written additional teachers to roster")
+            print("I just added teacher:", additionalTeacherId, "to the class:", additionalClassUnitID)
+            print("*******************")
+
+except:
+    print("something went wrong with the additional teacher section")
 
 finally:
     # closing database connection.

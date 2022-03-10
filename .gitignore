@@ -1,6 +1,7 @@
 # Custom
 config.ini
 approved_classes.csv
+additional_teachers.csv
 /sds/School.csv
 /sds/Section.csv
 /sds/Student.csv
